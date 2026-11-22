@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Native git pre-commit hook for the inat repo.
+#
+# Enforces the project's spec-first / TDD-first workflow even when the
+# committer (human or Claude instance) did not load CLAUDE.md — e.g.
+# because Claude Code was launched from a parent directory outside this
+# repo and its CWD-based CLAUDE.md discovery never loaded the project
+# rules.
+#
+# To activate this hook in a fresh clone, run once:
+#   bash scripts/install-hooks.sh
+#
+# The hook does five things, all against go/:
+#   1. gofmt -l       (formatting; non-empty list = fail)
+#   2. go vet ./...   (built-in static analysis)
+#   3. staticcheck ./... (clippy-equivalent rigour;
+#                         install-hooks.sh installs it)
+#   4. go test ./...  (full test suite)
+#   5. spec-presence check: if the commit touches go/ but no
+#      docs/specs/ or docs/plan/ file, block with an error pointing
+#      at CLAUDE.md §Spec.
+#
+# Bypass the spec-presence check only for mechanical commits
+# (formatting-only, dependency bumps, etc.) with:
+#   INAT_SKIP_SPEC_CHECK=1 git commit ...
+
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+echo "[inat pre-commit] gofmt -l (in go/)"
+unformatted=$(cd go && gofmt -l .)
+if [[ -n "$unformatted" ]]; then
+    echo "[inat pre-commit] BLOCKED: the following go/ files are not gofmt-clean:" >&2
+    echo "$unformatted" | sed 's/^/  /' >&2
+    echo "Run \`(cd go && gofmt -w .)\` to fix." >&2
+    exit 1
+fi
+
+echo "[inat pre-commit] go vet ./... (in go/)"
+(cd go && go vet ./...)
+
+echo "[inat pre-commit] staticcheck ./... (in go/)"
+if ! command -v staticcheck >/dev/null 2>&1; then
+    cat <<'MSG' >&2
+[inat pre-commit] BLOCKED: staticcheck not on PATH.
+
+staticcheck is the clippy-equivalent linter for the Go tree. Install
+with:
+  go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
+
+Or re-run scripts/install-hooks.sh which will install it for you.
+MSG
+    exit 1
+fi
+(cd go && staticcheck ./...)
+
+echo "[inat pre-commit] go test ./... (in go/)"
+(cd go && go test ./...)
+
+if [[ "${INAT_SKIP_SPEC_CHECK:-0}" == "1" ]]; then
+    echo "[inat pre-commit] INAT_SKIP_SPEC_CHECK=1 — skipping spec-presence check"
+    exit 0
+fi
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+touches_src=$(echo "$staged" | grep -E '^go/' || true)
+touches_docs=$(echo "$staged" | grep -E '^docs/(specs|plan)/' || true)
+
+if [[ -n "$touches_src" && -z "$touches_docs" ]]; then
+    cat <<MSG >&2
+
+[inat pre-commit] BLOCKED: commit touches go/ but no docs/specs/ or docs/plan/.
+
+The inat project requires spec-first / plan-first development
+(see CLAUDE.md §"Spec" and docs/guidelines/coding-standards.md).
+Before changing Go sources, add or update a spec and/or plan
+document that describes the change.
+
+Files touched under go/:
+$(echo "$touches_src" | sed 's/^/  /')
+
+If this is a mechanical commit (formatting, dependency bump,
+renames without behaviour change), re-run with:
+  INAT_SKIP_SPEC_CHECK=1 git commit ...
+
+MSG
+    exit 1
+fi
+
+exit 0
