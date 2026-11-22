@@ -1,0 +1,8 @@
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+target/
+spike/**/target/
+
+# Local smoke-test artifacts from running `inat init` inside go/
+go/CLAUDE.md
+go/.inat/

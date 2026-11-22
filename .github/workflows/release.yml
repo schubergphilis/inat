@@ -1,0 +1,54 @@
+# Release on a version tag: verify, build the four archives, write
+# SHA256SUMS, publish a GitHub Release with the archives, SHA256SUMS and
+# the installers. Tags with '-' publish as pre-releases. Spec 0027.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: go/go.sum
+      - name: verify tag, VERSION and CHANGELOG
+        run: sh ci/verify-release-prereqs.sh "$TAG"
+      - name: install rcodesign
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          INAT_RCODESIGN_DIR="$RUNNER_TEMP/bin" sh ci/install-rcodesign.sh
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: build archives
+        run: |
+          for target in x86_64-unknown-linux-gnu x86_64-pc-windows-msvc \
+                        x86_64-apple-darwin aarch64-apple-darwin; do
+            sh ci/build-release.sh "$target" "$TAG"
+          done
+      - name: checksums
+        run: sha256sum inat-*.tar.gz inat-*.zip | tee SHA256SUMS
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${TAG#v}"
+          sh ci/extract-changelog-section.sh "$(tr -d '[:space:]' < VERSION)" > "$RUNNER_TEMP/notes.md"
+          PRERELEASE=""
+          case "$TAG" in *-*) PRERELEASE="--prerelease" ;; esac
+          # shellcheck disable=SC2086
+          gh release create "$TAG" $PRERELEASE \
+            --title "inat v${VERSION}" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            inat-*.tar.gz inat-*.zip SHA256SUMS \
+            install.sh uninstall.sh install.ps1 uninstall.ps1

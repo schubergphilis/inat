@@ -1,0 +1,103 @@
+# CI for inat: lint and test on Linux, Windows and macOS, the installer
+# test suites, and a cross-compile of every release target. Spec 0027.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: go
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: go/go.sum
+      - name: go mod tidy is clean
+        run: go mod tidy -diff
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { echo 'gofmt failures:'; gofmt -l .; exit 1; }
+      - name: go vet
+        run: go vet ./...
+      # staticcheck v0.8.x needs Go 1.26+; bump both together.
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+      - name: go test
+        run: go test ./...
+
+  cross-compile:
+    needs: go
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: go/go.sum
+      - name: build every release target
+        run: |
+          for t in linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64; do
+            echo "==> $t"
+            CGO_ENABLED=0 GOOS="${t%/*}" GOARCH="${t#*/}" go build -o /dev/null .
+          done
+
+  installers-sh:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # sh is dash on Ubuntu and bash in POSIX mode on macOS.
+      - name: installer tests (sh)
+        run: sh tests/installer_tests.sh
+      - name: installer tests (bash)
+        run: bash tests/installer_tests.sh
+
+  installers-ps:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer | Where-Object Version -eq '1.22.0')) {
+              Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.22.0 -Scope CurrentUser -Force
+          }
+          Import-Module PSScriptAnalyzer -RequiredVersion 1.22.0
+          # -Path takes one string in 1.22, so lint each installer in turn.
+          $issues = foreach ($script in 'install.ps1', 'uninstall.ps1') {
+              Invoke-ScriptAnalyzer -Path $script `
+                                    -Settings PSScriptAnalyzerSettings.psd1 `
+                                    -Severity Error, Warning
+          }
+          if ($issues) {
+              $issues | Format-Table -AutoSize | Out-String | Write-Host
+              throw 'PSScriptAnalyzer found Error or Warning issues.'
+          }
+      # The one-liner runs under either shell, so test both.
+      - name: installer tests (Windows PowerShell 5.1)
+        shell: powershell
+        run: .\tests\installer_tests.ps1
+      - name: installer tests (pwsh)
+        shell: pwsh
+        run: .\tests\installer_tests.ps1

@@ -1,0 +1,18 @@
+# Force LF on shell scripts even when checked out on Windows. A CR at
+# the end of the shebang line makes Linux refuse to exec the script
+# ("/bin/sh^M: no such file or directory"), and the installers run on
+# Linux runners and on end-user Linux/macOS machines.
+*.sh text eol=lf
+
+# Same reasoning for the bash pre-commit hook and PowerShell scripts
+# (PowerShell is tolerant of CRLF but Windows Git Bash autocrlf can
+# still cause diff noise). Normalise.
+.githooks/* text eol=lf
+*.ps1 text eol=crlf
+
+# Go toolchain (gofmt, go vet, staticcheck) requires LF. The pre-commit
+# hook runs gofmt -l against go/; without these rules core.autocrlf=true
+# on Windows converts LF→CRLF on checkout and every Go file fails gofmt.
+*.go    text eol=lf
+go.mod  text eol=lf
+go.sum  text eol=lf
