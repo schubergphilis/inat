@@ -67,6 +67,15 @@ assert_eq "parse_args --install-dir=<d>" "${INSTALL_DIR}" "/tmp/inat-test"
 assert_exits "parse_args rejects --unknown"     2  parse_args --unknown
 assert_exits "parse_args rejects bare --version" 2 parse_args --version
 
+# --- fail ---
+
+set +e
+fail_msg="$( (fail "boom" 4) 2>&1 )"
+fail_code=$?
+set -e
+assert_eq "fail prints only the message" "${fail_msg}" "error: boom"
+assert_eq "fail exits with the given code" "${fail_code}" "4"
+
 # --- fetch is anonymous ---
 # Stub curl to record its arguments; a token left in the environment
 # must never reach the request.
@@ -187,6 +196,8 @@ uninstall_tests_out="$(mktemp)"
     # shellcheck disable=SC1091
     INAT_UNINSTALL_TEST=1 . "${SCRIPT_DIR}/uninstall.sh"
 
+    fail_msg="$( (fail "boom" 2) 2>&1 )" || true
+
     workdir="$(mktemp -d)"
     profile="${workdir}/.bashrc"
     cat > "${profile}" <<EOF
@@ -220,18 +231,20 @@ EOF
     idem=0
     [ "${cleaned}" = "${cleaned2}" ] && idem=1
 
-    printf '%s\n%s\n%s\n' "${has_markers}" "${has_user}" "${idem}"
+    printf '%s\n%s\n%s\n%s\n' "${has_markers}" "${has_user}" "${idem}" "${fail_msg}"
     rm -rf "${workdir}"
 ) > "${uninstall_tests_out}"
 
 has_markers="$(sed -n '1p' "${uninstall_tests_out}")"
 has_user="$(sed -n '2p' "${uninstall_tests_out}")"
 idem="$(sed -n '3p' "${uninstall_tests_out}")"
+uninstall_fail_msg="$(sed -n '4p' "${uninstall_tests_out}")"
 rm -f "${uninstall_tests_out}"
 
 assert_eq "strip_block removes markers"       "${has_markers}" "0"
 assert_eq "strip_block preserves user content" "${has_user}"    "1"
 assert_eq "strip_block idempotent"             "${idem}"        "1"
+assert_eq "uninstall fail prints only the message" "${uninstall_fail_msg}" "error: boom"
 
 # --- Summary ---
 printf '\n%d passed, %d failed\n' "${PASS}" "${FAIL}"
