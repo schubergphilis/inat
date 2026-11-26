@@ -54,7 +54,7 @@ MODIFY_PATH="yes"
 INSTALL_DIR="${INAT_INSTALL_DIR:-$HOME/.local/bin}"
 
 log()  { printf '%s\n' "$*" >&2; }
-fail() { printf 'error: %s\n' "$*" >&2; exit "${2:-1}"; }
+fail() { printf 'error: %s\n' "$1" >&2; exit "${2:-1}"; }
 
 usage() {
     sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'

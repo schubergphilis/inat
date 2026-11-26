@@ -31,7 +31,7 @@ PROFILES_TOUCHED=""
 BIN_ACTION=""
 
 log()  { printf '%s\n' "$*" >&2; }
-fail() { printf 'error: %s\n' "$*" >&2; exit "${2:-1}"; }
+fail() { printf 'error: %s\n' "$1" >&2; exit "${2:-1}"; }
 
 parse_args() {
     while [ $# -gt 0 ]; do
